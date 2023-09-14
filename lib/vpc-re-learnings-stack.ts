@@ -64,9 +64,10 @@ export class VpcReLearningsStack extends Stack {
       'echo "<h1>Hello World from $(hostname -f)</h1>" > /var/www/html/index.html'
     );
     // Template for instances launched by the auto-scaling group
-    new LaunchTemplate(this, "Launch Template 1", {
+    const launchTemplate = new LaunchTemplate(this, "Launch Template 1", {
       userData,
     });
+
 
     // Auto Scaling Group to control scaling in and out
     const autoscalingGroup = new AutoScalingGroup(this, "AutoScaling Group 1", {
@@ -79,6 +80,7 @@ export class VpcReLearningsStack extends Stack {
       maxCapacity: 5,
       minCapacity: 2,
       desiredCapacity: 3,
+      launchTemplate,
     });
     autoscalingGroup.scaleOnCpuUtilization("Scale", {
       targetUtilizationPercent: 80,
