@@ -17,6 +17,7 @@ import {
   ApplicationProtocol,
   ApplicationTargetGroup,
   ListenerAction,
+  TargetType,
 } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Construct } from "constructs";
 
@@ -46,6 +47,7 @@ export class VpcReLearningsStack extends Stack {
           vpc: vpc,
           protocol: ApplicationProtocol.HTTP,
           port: 80,
+          targetType: TargetType.INSTANCE,
         }
       );
 
@@ -125,28 +127,20 @@ export class VpcReLearningsStack extends Stack {
 
     // Create a route from each private subnet in VPC1 to VPC2 via the peering connection
     resourceSet1.vpc.privateSubnets.forEach((subnet, idx) => {
-      new CfnRoute(
-        this,
-        `Route from VPC1 subnet ${idx} to VPC2`,
-        {
-          routeTableId: subnet.routeTable.routeTableId,
-          destinationCidrBlock: resourceSet2.vpc.vpcCidrBlock,
-          vpcPeeringConnectionId: peeringConnection.attrId,
-        }
-      );
+      new CfnRoute(this, `Route from VPC1 subnet ${idx} to VPC2`, {
+        routeTableId: subnet.routeTable.routeTableId,
+        destinationCidrBlock: resourceSet2.vpc.vpcCidrBlock,
+        vpcPeeringConnectionId: peeringConnection.attrId,
+      });
     });
 
     // Create a route from each private subnet in VPC2 to VPC1 via the peering connection
     resourceSet2.vpc.privateSubnets.forEach((subnet, idx) => {
-      new CfnRoute(
-        this,
-        `Route from VPC2 subnet ${idx} to VPC1`,
-        {
-          routeTableId: subnet.routeTable.routeTableId,
-          destinationCidrBlock: resourceSet1.vpc.vpcCidrBlock,
-          vpcPeeringConnectionId: peeringConnection.attrId,
-        }
-      );
+      new CfnRoute(this, `Route from VPC2 subnet ${idx} to VPC1`, {
+        routeTableId: subnet.routeTable.routeTableId,
+        destinationCidrBlock: resourceSet1.vpc.vpcCidrBlock,
+        vpcPeeringConnectionId: peeringConnection.attrId,
+      });
     });
   }
 }
