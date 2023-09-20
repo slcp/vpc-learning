@@ -3,11 +3,12 @@ import { AutoScalingGroup } from "aws-cdk-lib/aws-autoscaling";
 import {
   AmazonLinuxGeneration,
   AmazonLinuxImage,
+  CfnRoute,
+  CfnVPCPeeringConnection,
   InstanceClass,
   InstanceSize,
   InstanceType,
-  LaunchTemplate,
-  SecurityGroup,
+  IpAddresses,
   UserData,
   Vpc,
 } from "aws-cdk-lib/aws-ec2";
@@ -23,11 +24,14 @@ export class VpcReLearningsStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    [1, 2].map((count) => {
+    const [resourceSet1, resourceSet2] = [
+      { id: 1, cidr: "10.42.11.0/24" },
+      { id: 2, cidr: "10.7.11.0/24" },
+    ].map(({ id: count, cidr }) => {
       // VPC
       // Creates routing for public and private subnets - route tables/rules via Internet Gateway and NAT Gateway for public/private
-      const vpc1 = new Vpc(this, `VPC${count}`, {
-        // cidr: Defaults to 10.0.0.0/16
+      const vpc = new Vpc(this, `VPC${count}`, {
+        ipAddresses: IpAddresses.cidr(cidr), // Defaults to 10.0.0.0/16 <--- This will need updating to facilitate VPC Peering, cannot overlap
         maxAzs: 99, // Defaults to 3, high number will results in all AZs being used
         // natGateways: Defaults to 1 (per AZ)
         // subnetConfiguration: Defaults to 1 private/1 public per AZ evenly splitting the CIDR range
@@ -35,16 +39,20 @@ export class VpcReLearningsStack extends Stack {
       });
 
       // Target Group to route requests to
-      const targetGroup = new ApplicationTargetGroup(this, `Target Group ${count}`, {
-        vpc: vpc1,
-        protocol: ApplicationProtocol.HTTP,
-        port: 80,
-      });
+      const targetGroup = new ApplicationTargetGroup(
+        this,
+        `Target Group ${count}`,
+        {
+          vpc: vpc,
+          protocol: ApplicationProtocol.HTTP,
+          port: 80,
+        }
+      );
 
       // Load balancer
       // Defaults to one in every availability zone
       const alb = new ApplicationLoadBalancer(this, `ALB${count}`, {
-        vpc: vpc1,
+        vpc: vpc,
         internetFacing: true,
         // vpcSubnets: Defaults to SubnetSelection.PRIVATE_WITH_NAT, which is what we created above
       });
@@ -82,7 +90,7 @@ export class VpcReLearningsStack extends Stack {
         this,
         `AutoScaling Group ${count}`,
         {
-          vpc: vpc1,
+          vpc: vpc,
           // vpcSubnets: Defaults to all private subnets
           maxCapacity: 5,
           minCapacity: 2,
@@ -101,6 +109,44 @@ export class VpcReLearningsStack extends Stack {
         targetUtilizationPercent: 80,
       });
       autoscalingGroup.attachToApplicationTargetGroup(targetGroup);
+
+      return { vpc, alb, autoscalingGroup, targetGroup };
+    });
+
+    // Create a peering connection
+    const peeringConnection = new CfnVPCPeeringConnection(
+      this,
+      "VPC Peering Connection",
+      {
+        peerVpcId: resourceSet2.vpc.vpcId,
+        vpcId: resourceSet1.vpc.vpcId,
+      }
+    );
+
+    // Create a route from each private subnet in VPC1 to VPC2 via the peering connection
+    resourceSet1.vpc.privateSubnets.forEach((subnet, idx) => {
+      new CfnRoute(
+        this,
+        `Route from VPC1 subnet ${idx} to VPC2`,
+        {
+          routeTableId: subnet.routeTable.routeTableId,
+          destinationCidrBlock: resourceSet2.vpc.vpcCidrBlock,
+          vpcPeeringConnectionId: peeringConnection.attrId,
+        }
+      );
+    });
+
+    // Create a route from each private subnet in VPC2 to VPC1 via the peering connection
+    resourceSet2.vpc.privateSubnets.forEach((subnet, idx) => {
+      new CfnRoute(
+        this,
+        `Route from VPC2 subnet ${idx} to VPC1`,
+        {
+          routeTableId: subnet.routeTable.routeTableId,
+          destinationCidrBlock: resourceSet1.vpc.vpcCidrBlock,
+          vpcPeeringConnectionId: peeringConnection.attrId,
+        }
+      );
     });
   }
 }
